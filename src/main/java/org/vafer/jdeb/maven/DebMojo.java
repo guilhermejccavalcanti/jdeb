@@ -26,7 +26,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -54,6 +53,13 @@ public class DebMojo extends AbstractPluginMojo {
      * @component
      */
     private MavenProjectHelper projectHelper;
+
+    /**
+     * Defines the name of deb package.
+     *
+     * @parameter
+     */
+    private String name;
 
     /**
      * Defines the pattern of the name of final artifacts. Possible
@@ -101,7 +107,6 @@ public class DebMojo extends AbstractPluginMojo {
      */
     private String compression;
 
-
     /**
      * Boolean option whether to attach the artifact to the project
      *
@@ -118,7 +123,6 @@ public class DebMojo extends AbstractPluginMojo {
      * @parameter default-value="/opt/[[artifactId]]"
      */
     private String installDir;
-
 
     /**
      * The type of attached artifact
@@ -236,22 +240,23 @@ public class DebMojo extends AbstractPluginMojo {
     private boolean verbose;
 
     /* end of parameters */
-
     private String openReplaceToken = "[[";
+
     private String closeReplaceToken = "]]";
+
     private Collection<DataProducer> dataProducers = new ArrayList<DataProducer>();
 
-    public void setOpenReplaceToken( String openReplaceToken ) {
+    public void setOpenReplaceToken(String openReplaceToken) {
         this.openReplaceToken = openReplaceToken;
         AbstractDescriptor.setOpenToken(openReplaceToken);
     }
 
-    public void setCloseReplaceToken( String closeReplaceToken ) {
+    public void setCloseReplaceToken(String closeReplaceToken) {
         this.closeReplaceToken = closeReplaceToken;
         AbstractDescriptor.setCloseToken(closeReplaceToken);
     }
 
-    protected void setData( Data[] dataSet ) {
+    protected void setData(Data[] dataSet) {
         this.dataSet = dataSet;
         dataProducers.clear();
         if (dataSet != null) {
@@ -259,10 +264,9 @@ public class DebMojo extends AbstractPluginMojo {
         }
     }
 
-    protected VariableResolver initializeVariableResolver( Map<String, String> variables ) {
+    protected VariableResolver initializeVariableResolver(Map<String, String> variables) {
         ((Map) variables).putAll(getProject().getProperties());
-
-        variables.put("name", getProject().getName());
+        variables.put("name", name != null ? name : getProject().getName());
         variables.put("artifactId", getProject().getArtifactId());
         variables.put("groupId", getProject().getGroupId());
         variables.put("version", getProjectVersion());
@@ -272,7 +276,6 @@ public class DebMojo extends AbstractPluginMojo {
         variables.put("buildDir", buildDirectory.getAbsolutePath());
         variables.put("project.version", getProject().getVersion());
         variables.put("url", getProject().getUrl());
-
         return new MapVariableResolver(variables);
     }
 
@@ -287,13 +290,11 @@ public class DebMojo extends AbstractPluginMojo {
      */
     private String getProjectVersion() {
         String version = getProject().getVersion().replace('-', '+');
-
-        if (this.timestamped && version.endsWith("+SNAPSHOT")) {            
+        if (this.timestamped && version.endsWith("+SNAPSHOT")) {
             version = version.substring(0, version.length() - "+SNAPSHOT".length());
             version += "~";
             version += new SimpleDateFormat("yyyyMMdd.HHmmss").format(session.getStartTime());
         }
-
         return version;
     }
 
@@ -301,7 +302,6 @@ public class DebMojo extends AbstractPluginMojo {
      * @return whether or not Maven is currently operating in the execution root
      */
     private boolean isSubmodule() {
-        // FIXME there must be a better way
         return !session.getExecutionRootDirectory().equalsIgnoreCase(baseDir.toString());
     }
 
@@ -321,69 +321,46 @@ public class DebMojo extends AbstractPluginMojo {
      */
     @Override
     public void execute() throws MojoExecutionException {
-
         final MavenProject project = getProject();
-
         if (isSubmodule() && !submodules) {
             getLog().info("skipping sub module: jdeb executing at top-level only");
             return;
         }
-
         setData(dataSet);
-
         Console infoConsole = new MojoConsole(getLog(), verbose);
-
         final VariableResolver resolver = initializeVariableResolver(new HashMap<String, String>());
-
         final File debFile = new File(Utils.replaceVariables(resolver, deb, openReplaceToken, closeReplaceToken));
         final File controlDirFile = new File(Utils.replaceVariables(resolver, controlDir, openReplaceToken, closeReplaceToken));
         final File installDirFile = new File(Utils.replaceVariables(resolver, installDir, openReplaceToken, closeReplaceToken));
         final File changesInFile = new File(Utils.replaceVariables(resolver, changesIn, openReplaceToken, closeReplaceToken));
         final File changesOutFile = new File(Utils.replaceVariables(resolver, changesOut, openReplaceToken, closeReplaceToken));
         final File changesSaveFile = new File(Utils.replaceVariables(resolver, changesSave, openReplaceToken, closeReplaceToken));
-
-        // if there are no producers defined we try to use the artifacts
         if (dataProducers.isEmpty()) {
-
             if (!hasMainArtifact()) {
-
                 final String packaging = project.getPackaging();
                 if ("pom".equalsIgnoreCase(packaging)) {
                     getLog().warn("Creating empty debian package.");
                 } else {
-                    throw new MojoExecutionException(
-                        "Nothing to include into the debian package. " +
-                            "Did you maybe forget to add a <data> tag or call the plugin directly?");
+                    throw new MojoExecutionException("Nothing to include into the debian package. " + "Did you maybe forget to add a <data> tag or call the plugin directly?");
                 }
-
             } else {
-
                 Set<Artifact> artifacts = new HashSet<Artifact>();
-
                 artifacts.add(project.getArtifact());
-
                 for (Artifact artifact : (Set<Artifact>) project.getArtifacts()) {
                     artifacts.add(artifact);
                 }
-
                 for (Artifact artifact : (List<Artifact>) project.getAttachedArtifacts()) {
                     artifacts.add(artifact);
                 }
-
-                for(Artifact artifact : artifacts) {
+                for (Artifact artifact : artifacts) {
                     final File file = artifact.getFile();
                     if (file != null) {
                         dataProducers.add(new DataProducer() {
+
                             @Override
-                            public void produce( final DataConsumer receiver ) {
+                            public void produce(final DataConsumer receiver) {
                                 try {
-                                    receiver.onEachFile(
-                                        new FileInputStream(file),
-                                        new File(installDirFile, file.getName()).getAbsolutePath(),
-                                        "",
-                                        "root", 0, "root", 0,
-                                        TarEntry.DEFAULT_FILE_MODE,
-                                        file.length());
+                                    receiver.onEachFile(new FileInputStream(file), new File(installDirFile, file.getName()).getAbsolutePath(), "", "root", 0, "root", 0, TarEntry.DEFAULT_FILE_MODE, file.length());
                                 } catch (Exception e) {
                                     getLog().error(e);
                                 }
@@ -395,26 +372,19 @@ public class DebMojo extends AbstractPluginMojo {
                 }
             }
         }
-
         try {
-
             DebMaker debMaker = new DebMaker(infoConsole, debFile, controlDirFile, dataProducers, resolver);
-
             if (changesInFile.exists() && changesInFile.canRead()) {
                 debMaker.setChangesIn(changesInFile);
                 debMaker.setChangesOut(changesOutFile);
                 debMaker.setChangesSave(changesSaveFile);
             }
-
             debMaker.setCompression(compression);
             debMaker.makeDeb();
-
-            // Always attach unless explicitly set to false
             if ("true".equalsIgnoreCase(attach)) {
                 getLog().info("Attaching created debian archive " + debFile);
                 projectHelper.attachArtifact(project, type, classifier, debFile);
             }
-
         } catch (PackagingException e) {
             getLog().error("Failed to create debian package " + debFile, e);
             throw new MojoExecutionException("Failed to create debian package " + debFile, e);
